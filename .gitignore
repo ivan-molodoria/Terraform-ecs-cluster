@@ -1,0 +1,4 @@
+terraform.tfvars
+terraform.tfstate.backup
+ip_address.txt
+.terraform/
