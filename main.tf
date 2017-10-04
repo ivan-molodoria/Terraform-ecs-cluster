@@ -49,6 +49,13 @@ resource "aws_security_group" "web-ecr" {
     }
 
     ingress {
+        from_port = 8000
+        to_port = 8000
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    }
+
+    ingress {
         from_port = 22
         to_port = 22
 	protocol = "tcp"
@@ -78,7 +85,7 @@ resource "aws_eip" "ip1" {
 resource "aws_instance" "ecs_instance" {
   count = 1
 
-key_name                    = "aws_key_home"
+key_name                    = "aws_key_work"
 ami                         = "ami-1d668865"
 instance_type               = "t2.micro"
 vpc_security_group_ids      = ["${aws_security_group.web-ecr.id}"]
@@ -87,9 +94,79 @@ user_data = "#!/bin/bash\necho ECS_CLUSTER=ecs-cluster > /etc/ecs/ecs.config"
 connection {
   host = "${self.public_ip}"
   user = "ec2-user"
-  private_key = "${file("../aws_key_home.pem")}"
+  private_key = "${file("/home/ivan/.ssh/aws_key_work.pem")}"
   agent = "false"
   type = "ssh"
   timeout = "30s"
   }
 }
+
+## Create task difinition
+data "aws_ecs_task_definition" "web-task" {
+task_definition = "${aws_ecs_task_definition.web-task.family}"
+}
+
+resource "aws_ecs_cluster" "ecs-cluster" {
+ name = "ecs-cluster"
+}
+
+resource "aws_ecs_task_definition" "web-task" {
+ family = "web-task"
+
+ container_definitions = <<DEFINITION
+[
+ {
+   "cpu": 128,
+   "environment": [{
+     "name": "SECRET",
+     "value": "KEY"
+   }],
+   "essential": true,
+   "image": "425987977703.dkr.ecr.us-west-2.amazonaws.com/test-repo:latest",
+   "memory": 128,
+   "memoryReservation": 64,
+   "name": "angular",
+   "portMappings": [{
+        "containerPort": 8000,
+        "hostPort": 8000
+   }]
+ }
+]
+DEFINITION
+}
+
+## Create ecs service
+
+resource "aws_ecs_service" "service1" {
+ name          = "web-service"
+ cluster       = "${aws_ecs_cluster.ecs-cluster.id}"
+ desired_count = 2
+
+ # Track the latest ACTIVE revision
+ task_definition = "${aws_ecs_task_definition.web-task.family}:${max("${aws_ecs_task_definition.web-task.revision}", "${data.aws_ecs_task_definition.web-task.revision}")}"
+}
+
+
+
+
+#resource "aws_ecs_service" "service1" {
+#task_definition = "${aws_ecs_task_definition.web-task.arn}"
+#  desired_count   = 1
+#  iam_role        = "${aws_iam_role.foo.arn}"
+#  depends_on      = ["aws_iam_role_policy.foo"]
+
+#  placement_strategy {
+#    type  = "binpack"
+#    field = "cpu"
+#  }
+
+#  load_balancer {
+#    elb_name       = "${aws_elb.foo.name}"
+#    container_name = "mongo"
+#  }
+
+#  placement_constraints {
+#    type       = "memberOf"
+#    expression = "attribute:ecs.availability-zone in [us-west-2a, us-west-2b]"
+#  }
+#}
